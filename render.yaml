@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: contest-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        value: 8686831380:AAEiLnZe7JxE5wvISPk3gGagrBoSEQ2oocc
+      - key: ADMIN_IDS
+        value: 6894541413, 7699457122
