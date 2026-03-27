@@ -12,7 +12,7 @@ from aiogram.enums import ParseMode
 from config import config
 from database import db
 from keyboards import *
-from states import CreateContest, AddChannel
+from states import CreateContest, AddChannel, SendReklama
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -915,6 +915,206 @@ async def admin_all_users(callback: CallbackQuery):
         await callback.message.answer(f"❌ Xatolik: {str(e)}")
         await callback.answer()
 
+
+# ============ REKLAMA FUNKSIYALARI ============
+
+@dp.callback_query(F.data == "admin_send_ad")
+async def admin_send_ad(callback: CallbackQuery, state: FSMContext):
+    """Admin reklama yuborish"""
+    user = db.get_user(callback.from_user.id)
+    if not user['is_admin']:
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+
+    await state.set_state(SendReklama.waiting_for_ad_text)
+    await callback.message.answer(
+        "<b>📢 REKLAMA YUBORISH</b>\n\n"
+        "Yubormoqchi bo'lgan reklama matnini yozing.\n"
+        "Matn bilan birga rasm, video yoki GIF ham yuborishingiz mumkin.\n\n"
+        "❗ Faqat 1 ta media fayl ishlatishingiz mumkin.\n\n"
+        "Reklama BARCHA foydalanuvchilarga yuboriladi.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=get_cancel_keyboard()
+    )
+    await callback.answer()
+
+
+@dp.message(StateFilter(SendReklama.waiting_for_ad_text))
+async def get_ad_text(message: Message, state: FSMContext):
+    """Reklama matnini olish"""
+    data = {'ad_text': message.html_text or message.text}
+
+    if message.photo:
+        data['ad_media_type'] = 'photo'
+        data['ad_media_file_id'] = message.photo[-1].file_id
+    elif message.video:
+        data['ad_media_type'] = 'video'
+        data['ad_media_file_id'] = message.video.file_id
+    elif message.animation:
+        data['ad_media_type'] = 'animation'
+        data['ad_media_file_id'] = message.animation.file_id
+    else:
+        data['ad_media_type'] = 'text'
+        data['ad_media_file_id'] = None
+
+    await state.update_data(data)
+
+    # Tasdiqlash uchun oldindan ko'rsatish
+    ad_text = data['ad_text']
+    ad_media_type = data['ad_media_type']
+    ad_media_file_id = data['ad_media_file_id']
+
+    # Foydalanuvchilar sonini olish
+    cursor = db.conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM users')
+    total_users = cursor.fetchone()[0]
+
+    text = "<b>📢 REKLAMA MA'LUMOTLARI</b>\n\n"
+    text += f"<b>📝 Matn:</b>\n{ad_text[:200]}...\n\n"
+    text += f"<b>👥 Yuboriladigan foydalanuvchilar:</b> {total_users} ta\n\n"
+    text += "✅ Reklamani yuborishni tasdiqlaysizmi?"
+
+    await state.set_state(SendReklama.confirm)
+
+    # Media bilan yuborish
+    if ad_media_type == 'photo' and ad_media_file_id:
+        await message.answer_photo(
+            photo=ad_media_file_id,
+            caption=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_reklama_confirm_keyboard()
+        )
+    elif ad_media_type == 'video' and ad_media_file_id:
+        await message.answer_video(
+            video=ad_media_file_id,
+            caption=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_reklama_confirm_keyboard()
+        )
+    elif ad_media_type == 'animation' and ad_media_file_id:
+        await message.answer_animation(
+            animation=ad_media_file_id,
+            caption=text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_reklama_confirm_keyboard()
+        )
+    else:
+        await message.answer(
+            text,
+            parse_mode=ParseMode.HTML,
+            reply_markup=get_reklama_confirm_keyboard()
+        )
+
+
+@dp.callback_query(F.data == "send_ad_confirm")
+async def send_ad_confirm(callback: CallbackQuery, state: FSMContext):
+    """Reklamani yuborish"""
+    user = db.get_user(callback.from_user.id)
+    if not user['is_admin']:
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+
+    data = await state.get_data()
+    ad_text = data.get('ad_text')
+    ad_media_type = data.get('ad_media_type')
+    ad_media_file_id = data.get('ad_media_file_id')
+
+    # Barcha foydalanuvchilarni olish
+    cursor = db.conn.cursor()
+    cursor.execute('SELECT telegram_id FROM users')
+    users = cursor.fetchall()
+
+    if not users:
+        await callback.message.answer("❌ Hech qanday foydalanuvchi topilmadi!")
+        await state.clear()
+        await callback.answer()
+        return
+
+    await callback.message.answer(
+        f"<b>📢 REKLAMA YUBORILMOQDA...</b>\n\n"
+        f"👥 {len(users)} ta foydalanuvchiga reklama yuboriladi.\n"
+        f"⏳ Iltimos kuting...",
+        parse_mode=ParseMode.HTML
+    )
+
+    success_count = 0
+    fail_count = 0
+
+    for user_row in users:
+        user_id = user_row[0]
+        try:
+            if ad_media_type == 'photo' and ad_media_file_id:
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=ad_media_file_id,
+                    caption=ad_text,
+                    parse_mode=ParseMode.HTML
+                )
+            elif ad_media_type == 'video' and ad_media_file_id:
+                await bot.send_video(
+                    chat_id=user_id,
+                    video=ad_media_file_id,
+                    caption=ad_text,
+                    parse_mode=ParseMode.HTML
+                )
+            elif ad_media_type == 'animation' and ad_media_file_id:
+                await bot.send_animation(
+                    chat_id=user_id,
+                    animation=ad_media_file_id,
+                    caption=ad_text,
+                    parse_mode=ParseMode.HTML
+                )
+            else:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=ad_text,
+                    parse_mode=ParseMode.HTML
+                )
+            success_count += 1
+            # Flood oldini olish uchun biroz kutish
+            await asyncio.sleep(0.05)
+        except Exception as e:
+            fail_count += 1
+            logger.error(f"Xabar yuborilmadi {user_id}: {e}")
+
+    # Natija haqida xabar
+    result_text = f"<b>📢 REKLAMA YUBORILDI!</b>\n\n"
+    result_text += f"✅ <b>Yuborilgan:</b> {success_count}\n"
+    result_text += f"❌ <b>Yuborilmagan:</b> {fail_count}\n"
+    result_text += f"👥 <b>Jami:</b> {len(users)}"
+
+    await callback.message.answer(result_text, parse_mode=ParseMode.HTML)
+
+    # Adminga log yuborish
+    await callback.message.answer(
+        f"📝 <b>Reklama matni:</b>\n{ad_text[:500]}",
+        parse_mode=ParseMode.HTML
+    )
+
+    await state.clear()
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "cancel_ad_send")
+async def cancel_ad_send(callback: CallbackQuery, state: FSMContext):
+    """Reklama yuborishni bekor qilish"""
+    await state.clear()
+    user = db.get_user(callback.from_user.id)
+    await callback.message.answer(
+        "❌ Reklama yuborish bekor qilindi.",
+        reply_markup=get_main_menu(user['is_admin'])
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_panel_back")
+async def admin_panel_back(callback: CallbackQuery):
+    """Admin panelga qaytish"""
+    await callback.message.answer(
+        "⚙️ Admin panel:",
+        reply_markup=get_admin_panel()
+    )
+    await callback.answer()
 
 # ============ MAIN ============
 async def main():

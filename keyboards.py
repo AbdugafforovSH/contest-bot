@@ -85,8 +85,17 @@ def get_contest_detail_keyboard(contest_id: str, is_active: bool) -> InlineKeybo
 
 def get_admin_panel() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="📊 Barcha konkurslar", callback_data="admin_all_contests")],
-        [InlineKeyboardButton(text="👥 Barcha foydalanuvchilar", callback_data="admin_all_users")],
+        [InlineKeyboardButton(text="📊 Konkurslar soni", callback_data="admin_all_contests")],
+        [InlineKeyboardButton(text="👥 Foydalanuvchilar soni", callback_data="admin_all_users")],
+        [InlineKeyboardButton(text="📢 Reklama yuborish", callback_data="admin_send_ad")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_reklama_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Reklamani tasdiqlash tugmalari"""
+    buttons = [
+        [InlineKeyboardButton(text="✅ Yuborish", callback_data="send_ad_confirm")],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_ad_send")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
